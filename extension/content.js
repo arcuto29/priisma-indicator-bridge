@@ -8,13 +8,14 @@
  * You set the current price by clicking on a zone or typing it in the input.
  */
 
-// Only run in top frame (not iframes)
-if (window.self !== window.top) {
-  // We're in an iframe — skip
-  // (We'll handle this from the top frame only)
-} else {
-  console.log('[Priisma] Starting in top frame:', window.location.href);
+// Run in any frame — create the panel wherever we can
+console.log('[Priisma] Content script loaded on:', window.location.href);
+
+// Only create the panel once per page
+if (!document.getElementById('priisma-panel')) {
   initPriisma();
+} else {
+  console.log('[Priisma] Panel already exists, skipping');
 }
 
 function initPriisma() {

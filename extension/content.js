@@ -1,15 +1,23 @@
 /**
- * Priisma LVN Zones — Chrome Extension Content Script
+ * Priisma LVN Zones — Chrome Extension Content Script v2
  *
- * Draws fixed LVN zones directly on the TradingView chart embedded in TopstepX.
+ * Shows a floating panel with NQ LVN zones on the page.
+ * Works on TopstepX, TradingView, or any page.
  *
- * How it works:
- * 1. Finds the TradingView chart container on the page
- * 2. Reads the price scale (Y axis) to map prices → pixel positions
- * 3. Creates a transparent overlay div on top of the chart
- * 4. Draws each LVN zone as a horizontal band at the correct pixel position
- * 5. Redraws whenever the chart scrolls/zooms/resizes
+ * The panel shows all zones and highlights which ones are near the current price.
+ * You set the current price by clicking on a zone or typing it in the input.
  */
+
+// Only run in top frame (not iframes)
+if (window.self !== window.top) {
+  // We're in an iframe — skip
+  // (We'll handle this from the top frame only)
+} else {
+  console.log('[Priisma] Starting in top frame:', window.location.href);
+  initPriisma();
+}
+
+function initPriisma() {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LVN ZONE DATA — 148 fixed zones for NQ
@@ -167,503 +175,176 @@ const NQ_ZONES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STATE
+// CREATE THE FLOATING PANEL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let overlay = null;
-let chartContainer = null;
-let isEnabled = true;
-let retryCount = 0;
-let lastKnownPrice = null;
-const MAX_RETRIES = 60; // Try for 60 seconds
+let currentPrice = null;
+let panelVisible = true;
+
+const panel = document.createElement('div');
+panel.id = 'priisma-panel';
+panel.innerHTML = `
+  <div id="priisma-header">
+    <span id="priisma-title">NQ LVN</span>
+    <span id="priisma-minimize">—</span>
+  </div>
+  <div id="priisma-body">
+    <div id="priisma-price-input-row">
+      <input type="text" id="priisma-price-input" placeholder="Enter NQ price..." />
+      <button id="priisma-go">Go</button>
+    </div>
+    <div id="priisma-status"></div>
+    <div id="priisma-zones-list"></div>
+  </div>
+`;
+document.body.appendChild(panel);
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHART DETECTION
+// PANEL LOGIC
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Find the TradingView chart container on the page.
- * TopstepX embeds TradingView in an iframe — with all_frames:true we run inside it.
- */
-function findChartContainer() {
-  // Try common TradingView selectors (most specific first)
-  const selectors = [
-    '.chart-markup-table',
-    '.layout__area--center',
-    '.chart-container',
-    '[class*="chart-container"]',
-    '[class*="chartContainer"]',
-    '.tv-chart-container',
-    '#tv_chart_container',
-    '[class*="chart-gui-wrapper"]',
-    '[class*="chart-widget"]',
-    '.chart-controls-bar',
-    '[data-name="legend"]',
-  ];
+const priceInput = document.getElementById('priisma-price-input');
+const goBtn = document.getElementById('priisma-go');
+const statusEl = document.getElementById('priisma-status');
+const zonesListEl = document.getElementById('priisma-zones-list');
+const minimizeBtn = document.getElementById('priisma-minimize');
+const bodyEl = document.getElementById('priisma-body');
 
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) {
-      console.log(`[Priisma] Found chart via selector: ${sel}`);
-      return el.closest('[class*="chart"]') || el.parentElement || el;
-    }
-  }
-
-  // Try finding any large canvas (TradingView renders to canvas)
-  const canvases = document.querySelectorAll('canvas');
-  for (const canvas of canvases) {
-    if (canvas.width > 300 && canvas.height > 150) {
-      console.log(`[Priisma] Found chart via canvas (${canvas.width}x${canvas.height})`);
-      // Walk up to find a suitable container
-      let container = canvas.parentElement;
-      while (container && container.clientHeight < 200) {
-        container = container.parentElement;
-      }
-      return container || canvas.parentElement;
-    }
-  }
-
-  // Last resort: use the body/document if this page looks like a chart
-  if (document.querySelector('canvas') || document.querySelector('[class*="chart"]')) {
-    console.log('[Priisma] Using body as fallback container');
-    return document.body;
-  }
-
-  return null;
-}
-
-/**
- * Find the price scale element to read price range
- */
-function findPriceScale() {
-  // TradingView price axis selectors
-  const selectors = [
-    '.price-axis',
-    '[class*="priceAxis"]',
-    '[class*="price-axis"]',
-    '.pane-legend-line',
-  ];
-
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) return el;
-  }
-
-  return null;
-}
-
-/**
- * Extract visible price range from the chart's price axis labels.
- * Reads the text content of price labels on the Y axis.
- */
-function getPriceRange() {
-  // Strategy 1: Find ALL text elements that look like NQ prices (27000-31000 range)
-  const allElements = document.querySelectorAll('span, div, text');
-  const prices = [];
-
-  for (const el of allElements) {
-    // Skip if element has children (only want leaf text nodes)
-    if (el.children.length > 2) continue;
-
-    const text = (el.textContent || '').trim();
-    // Match NQ-style prices: 5 digits, optional decimal
-    const match = text.match(/^(\d{4,5}(?:\.\d{1,2})?)$/);
-    if (match) {
-      const price = parseFloat(match[1]);
-      if (price >= 25000 && price <= 35000) {
-        // Check if this element is positioned on the right side (price axis)
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.width < 100) {
-          prices.push({ price, y: rect.top + rect.height / 2 });
-        }
-      }
-    }
-  }
-
-  if (prices.length >= 2) {
-    // Sort by Y position
-    prices.sort((a, b) => a.y - b.y);
-    // Top of screen = highest price, bottom = lowest price
-    const topPrice = prices[0].price;
-    const bottomPrice = prices[prices.length - 1].price;
-
-    // Determine which direction (top=high or top=low)
-    let high, low;
-    if (topPrice > bottomPrice) {
-      high = topPrice;
-      low = bottomPrice;
-    } else {
-      high = bottomPrice;
-      low = topPrice;
-    }
-
-    console.log(`[Priisma] Price range detected: ${low.toFixed(2)} – ${high.toFixed(2)} from ${prices.length} labels`);
-    return { high, low, labels: prices };
-  }
-
-  // Strategy 2: Look specifically for TradingView price axis classes
-  const priceAxisSelectors = [
-    '[class*="priceAxis"] [class*="label"]',
-    '[class*="price-axis"] span',
-    '[class*="pane-"] [class*="label"]',
-    '[class*="price"] [class*="value"]',
-    '.price-axis span',
-  ];
-
-  for (const sel of priceAxisSelectors) {
-    const elements = document.querySelectorAll(sel);
-    const axisPrices = [];
-    for (const el of elements) {
-      const text = el.textContent.trim().replace(/[^0-9.]/g, '');
-      const price = parseFloat(text);
-      if (!isNaN(price) && price >= 25000 && price <= 35000) {
-        const rect = el.getBoundingClientRect();
-        axisPrices.push({ price, y: rect.top + rect.height / 2 });
-      }
-    }
-    if (axisPrices.length >= 2) {
-      axisPrices.sort((a, b) => a.y - b.y);
-      const high = Math.max(...axisPrices.map(p => p.price));
-      const low = Math.min(...axisPrices.map(p => p.price));
-      console.log(`[Priisma] Price range from axis (${sel}): ${low} – ${high}`);
-      return { high, low, labels: axisPrices };
-    }
-  }
-
-  return null;
-}
-
-/**
- * Alternative: Extract price range from the chart canvas by reading
- * the price axis rendering. Uses the last known price from the chart header.
- */
-function getPriceFromHeader() {
-  // TradingView shows the current price in the chart header/legend
-  const headerSelectors = [
-    '[class*="headerRow"] [class*="last"]',
-    '[class*="header"] [class*="price"]',
-    '[class*="legendValue"]',
-    '[class*="item-value"]',
-    '.tv-symbol-price-quote__value',
-    '[class*="lastPrice"]',
-    '[class*="last-price"]',
-    '[class*="currentPrice"]',
-    '[class*="mainValue"]',
-    '[class*="highlight"]',
-    '[class*="pane-legend"] [class*="value"]',
-    '[class*="legend"] [class*="value"]',
-  ];
-
-  for (const sel of headerSelectors) {
-    const els = document.querySelectorAll(sel);
-    for (const el of els) {
-      const text = (el.textContent || '').trim().replace(/[^0-9.]/g, '');
-      const price = parseFloat(text);
-      if (!isNaN(price) && price >= 25000 && price <= 35000) {
-        console.log(`[Priisma] Header price: ${price} (via ${sel})`);
-        return price;
-      }
-    }
-  }
-
-  // Scan ALL text nodes for NQ-like prices
-  const allText = document.body.innerText || '';
-  const matches = allText.match(/\b(2[5-9]\d{3}|3[0-4]\d{3})(\.\d{1,2})?\b/g);
-  if (matches && matches.length > 0) {
-    const price = parseFloat(matches[0]);
-    console.log(`[Priisma] Price from body text: ${price}`);
-    return price;
-  }
-
-  return null;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// OVERLAY DRAWING
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Create the overlay container
- */
-function createOverlay() {
-  if (overlay) {
-    overlay.remove();
-  }
-
-  overlay = document.createElement('div');
-  overlay.className = 'priisma-zone-overlay';
-  overlay.id = 'priisma-lvn-overlay';
-
-  // Position relative to the chart container
-  if (chartContainer) {
-    const style = window.getComputedStyle(chartContainer);
-    if (style.position === 'static') {
-      chartContainer.style.position = 'relative';
-    }
-    chartContainer.appendChild(overlay);
-  }
-
-  return overlay;
-}
-
-/**
- * Draw all LVN zones on the overlay
- */
-function drawZones() {
-  if (!overlay || !chartContainer) return;
-  if (!isEnabled) {
-    overlay.classList.add('priisma-hidden');
+function updateDisplay(price) {
+  currentPrice = price;
+  if (!price) {
+    statusEl.textContent = 'Enter current NQ price above';
+    zonesListEl.innerHTML = '';
     return;
   }
 
-  overlay.classList.remove('priisma-hidden');
+  // Find nearest zones above and below
+  const above = [];
+  const below = [];
+  let inside = null;
 
-  // Get chart dimensions
-  const rect = chartContainer.getBoundingClientRect();
-  const chartHeight = rect.height;
-
-  if (chartHeight < 100) return; // Chart not visible yet
-
-  // Get visible price range
-  let priceRange = manualPriceRange || getPriceRange();
-  if (!priceRange) {
-    // Can't determine price range yet — try using a fallback
-    const headerPrice = getPriceFromHeader() || lastKnownPrice;
-    if (!headerPrice) {
-      // Don't log every 2s, just once
-      if (!drawZones._loggedNoRange) {
-        console.log('[Priisma] Cannot determine price range yet, will keep retrying...');
-        drawZones._loggedNoRange = true;
-      }
-      return;
-    }
-    drawZones._loggedNoRange = false;
-    // Use header price with estimated range based on chart height
-    const estimatedRange = 200;
-    priceRange = {
-      high: headerPrice + estimatedRange / 2,
-      low: headerPrice - estimatedRange / 2,
-    };
-  } else {
-    drawZones._loggedNoRange = false;
-  }
-
-  const { high, low } = priceRange;
-  const pricePerPixel = (high - low) / chartHeight;
-
-  if (pricePerPixel <= 0) return;
-
-  // Clear existing zones
-  overlay.innerHTML = '';
-
-  // Draw each zone that's in the visible range
-  let drawnCount = 0;
   for (const [upper, lower] of NQ_ZONES) {
-    // Skip zones outside visible range (with some padding)
-    if (lower > high + 20 || upper < low - 20) continue;
-
-    // Calculate pixel positions (top of chart = highest price)
-    const topPx = (high - upper) / pricePerPixel;
-    const bottomPx = (high - lower) / pricePerPixel;
-    const heightPx = bottomPx - topPx;
-
-    if (heightPx < 0.5) continue; // Too small to see
-
-    // Create zone element
-    const zoneEl = document.createElement('div');
-    zoneEl.className = 'priisma-zone';
-    zoneEl.style.top = `${topPx}px`;
-    zoneEl.style.height = `${Math.max(1, heightPx)}px`;
-
-    const bandEl = document.createElement('div');
-    bandEl.className = 'priisma-zone-band';
-    zoneEl.appendChild(bandEl);
-
-    // Add label for wider zones
-    if (heightPx > 6) {
-      const labelEl = document.createElement('div');
-      labelEl.className = 'priisma-zone-label';
-      labelEl.textContent = `${upper.toFixed(2)}`;
-      zoneEl.appendChild(labelEl);
-    }
-
-    overlay.appendChild(zoneEl);
-    drawnCount++;
-  }
-
-  if (drawnCount > 0) {
-    console.log(`[Priisma] Drew ${drawnCount} LVN zones (visible: ${low.toFixed(0)} – ${high.toFixed(0)})`);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// INITIALIZATION & LIFECYCLE
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Initialize the extension
- */
-function init() {
-  console.log(`[Priisma] Scanning page: ${window.location.href}`);
-  console.log(`[Priisma] Document has ${document.querySelectorAll('canvas').length} canvases`);
-
-  chartContainer = findChartContainer();
-
-  if (!chartContainer) {
-    retryCount++;
-    if (retryCount < MAX_RETRIES) {
-      setTimeout(init, 1000);
+    if (price >= lower && price <= upper) {
+      inside = [upper, lower];
+    } else if (lower > price) {
+      above.push([upper, lower]);
     } else {
-      console.log('[Priisma] Could not find TradingView chart after 60 seconds.');
-      console.log('[Priisma] Page URL:', window.location.href);
-      console.log('[Priisma] Body classes:', document.body.className);
+      below.push([upper, lower]);
     }
-    return;
   }
 
-  console.log('[Priisma] Chart container found! Initializing LVN zones...');
-  console.log('[Priisma] Container:', chartContainer.tagName, chartContainer.className?.slice(0, 80));
+  // Sort: above by distance ascending (nearest first), below by distance ascending
+  above.sort((a, b) => a[1] - b[1]); // lowest 'lower' = nearest above
+  below.sort((a, b) => b[0] - a[0]); // highest 'upper' = nearest below
 
-  createOverlay();
-  drawZones();
+  const nearest3Above = above.slice(0, 3);
+  const nearest3Below = below.slice(0, 3);
 
-  // Redraw on resize
-  const resizeObserver = new ResizeObserver(() => {
-    drawZones();
-  });
-  resizeObserver.observe(chartContainer);
+  // Build display
+  let html = '';
 
-  // Redraw periodically (catches scroll/zoom that doesn't trigger resize)
-  setInterval(drawZones, 2000);
+  if (inside) {
+    html += `<div class="priisma-zone-row priisma-active">▶ IN ZONE: ${inside[0].toFixed(2)} – ${inside[1].toFixed(2)}</div>`;
+  }
 
-  // Also try to intercept price data from WebSocket messages
-  interceptPriceData();
+  html += '<div class="priisma-section-label">▲ ABOVE</div>';
+  for (const [upper, lower] of nearest3Above) {
+    const dist = (lower - price).toFixed(1);
+    html += `<div class="priisma-zone-row priisma-resistance">${upper.toFixed(2)} – ${lower.toFixed(2)} <span class="priisma-dist">+${dist}</span></div>`;
+  }
 
-  // Watch for DOM changes (chart re-renders)
-  const mutationObserver = new MutationObserver(() => {
-    // Debounce
-    clearTimeout(mutationObserver._timeout);
-    mutationObserver._timeout = setTimeout(drawZones, 500);
-  });
-  mutationObserver.observe(chartContainer, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['style', 'class'],
-  });
+  html += '<div class="priisma-section-label">▼ BELOW</div>';
+  for (const [upper, lower] of nearest3Below) {
+    const dist = (price - upper).toFixed(1);
+    html += `<div class="priisma-zone-row priisma-support">${upper.toFixed(2)} – ${lower.toFixed(2)} <span class="priisma-dist">-${dist}</span></div>`;
+  }
 
-  console.log(`[Priisma] LVN Zones active — ${NQ_ZONES.length} zones loaded for NQ`);
+  statusEl.textContent = `Price: ${price.toFixed(2)} | ${NQ_ZONES.length} zones`;
+  zonesListEl.innerHTML = html;
 }
 
-/**
- * Try to intercept the current price from TradingView's internal data.
- * TradingView stores chart data in global objects we can sometimes access.
- */
-function interceptPriceData() {
-  // Method 1: Look for TradingView widget API
-  if (window.TradingView && window.TradingView.activeChart) {
-    try {
-      const chart = window.TradingView.activeChart();
-      if (chart) {
-        const price = chart.crossHairPrice && chart.crossHairPrice();
-        if (price) {
-          lastKnownPrice = price;
-          console.log(`[Priisma] Got price from TV API: ${price}`);
-        }
-      }
-    } catch (e) {
-      // Expected to fail in most cases
+function handlePriceInput() {
+  const val = parseFloat(priceInput.value.trim());
+  if (!isNaN(val) && val > 1000) {
+    updateDisplay(val);
+    // Save last price
+    if (chrome.storage) {
+      chrome.storage.local.set({ priismaLastPrice: val });
     }
   }
+}
 
-  // Method 2: Monitor for price elements being added to DOM
-  const priceObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const text = (node.textContent || '').trim();
-          const match = text.match(/^(\d{5}(?:\.\d{1,2})?)$/);
-          if (match) {
-            const price = parseFloat(match[1]);
-            if (price >= 25000 && price <= 35000) {
-              if (lastKnownPrice !== price) {
-                lastKnownPrice = price;
-                console.log(`[Priisma] Price update from DOM: ${price}`);
-                drawZones();
-              }
-            }
+goBtn.addEventListener('click', handlePriceInput);
+priceInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handlePriceInput();
+});
+
+minimizeBtn.addEventListener('click', () => {
+  panelVisible = !panelVisible;
+  bodyEl.style.display = panelVisible ? 'block' : 'none';
+  minimizeBtn.textContent = panelVisible ? '—' : '+';
+});
+
+// Make panel draggable
+let isDragging = false;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
+const header = document.getElementById('priisma-header');
+header.addEventListener('mousedown', (e) => {
+  if (e.target === minimizeBtn) return;
+  isDragging = true;
+  dragOffsetX = e.clientX - panel.offsetLeft;
+  dragOffsetY = e.clientY - panel.offsetTop;
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  panel.style.left = (e.clientX - dragOffsetX) + 'px';
+  panel.style.top = (e.clientY - dragOffsetY) + 'px';
+  panel.style.right = 'auto';
+});
+
+document.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+// Load last saved price
+if (chrome.storage) {
+  chrome.storage.local.get(['priismaLastPrice'], (result) => {
+    if (result.priismaLastPrice) {
+      priceInput.value = result.priismaLastPrice;
+      updateDisplay(result.priismaLastPrice);
+    }
+  });
+}
+
+// Try to auto-detect price from page every 3 seconds
+setInterval(() => {
+  // Look for NQ prices in the page text
+  const bodyText = document.body.innerText || '';
+  const matches = bodyText.match(/\b(2[0-9]\d{3}|3[0-4]\d{3})(\.\d{1,2})?\b/g);
+  if (matches && matches.length > 0) {
+    // Filter to reasonable NQ prices
+    for (const m of matches) {
+      const p = parseFloat(m);
+      if (p >= 20000 && p <= 35000) {
+        if (!currentPrice || Math.abs(p - currentPrice) > 50) {
+          // Only auto-update if significantly different or no price set
+          if (!currentPrice) {
+            priceInput.value = p.toFixed(2);
+            updateDisplay(p);
+            console.log(`[Priisma] Auto-detected price: ${p}`);
           }
         }
+        break;
       }
     }
-  });
+  }
+}, 3000);
 
-  priceObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
-}
+console.log(`[Priisma] Panel ready — ${NQ_ZONES.length} NQ LVN zones loaded`);
+console.log('[Priisma] Enter the current NQ price in the panel to see nearest zones');
 
-/**
- * Listen for messages from popup (toggle on/off)
- */
-if (typeof chrome !== 'undefined' && chrome.runtime) {
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.action === 'toggle') {
-      isEnabled = !isEnabled;
-      drawZones();
-      sendResponse({ enabled: isEnabled });
-    } else if (msg.action === 'getStatus') {
-      sendResponse({ enabled: isEnabled, zones: NQ_ZONES.length });
-    } else if (msg.action === 'redraw') {
-      drawZones();
-      sendResponse({ ok: true });
-    }
-  });
-
-  // Load saved state
-  chrome.storage.local.get(['priismaEnabled'], (result) => {
-    if (result.priismaEnabled === false) {
-      isEnabled = false;
-    }
-    // Start
-    init();
-  });
-} else {
-  // Running outside extension context (for testing)
-  init();
-}
-
-/**
- * MANUAL PRICE OVERRIDE
- * If auto-detection fails, you can set the price range manually from console:
- *
- *   window.priismaSetPrice(21500)
- *   window.priismaSetRange(21400, 21600)
- *
- * This will immediately draw the zones.
- */
-window.priismaSetPrice = function(price) {
-  lastKnownPrice = price;
-  console.log(`[Priisma] Manual price set: ${price}`);
-  drawZones();
-};
-
-window.priismaSetRange = function(low, high) {
-  manualPriceRange = { low, high };
-  console.log(`[Priisma] Manual range set: ${low} – ${high}`);
-  drawZones();
-};
-
-window.priismaDebug = function() {
-  console.log('[Priisma] Debug info:');
-  console.log('  Chart container:', chartContainer?.tagName, chartContainer?.className?.slice(0, 60));
-  console.log('  Overlay:', overlay ? 'exists' : 'null');
-  console.log('  Enabled:', isEnabled);
-  console.log('  Last known price:', lastKnownPrice);
-  console.log('  Chart height:', chartContainer?.getBoundingClientRect()?.height);
-  console.log('  getPriceRange():', getPriceRange());
-  console.log('  getPriceFromHeader():', getPriceFromHeader());
-};
-
-let manualPriceRange = null;
+} // end initPriisma

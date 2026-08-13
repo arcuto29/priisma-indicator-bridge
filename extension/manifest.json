@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Priisma LVN Zones",
-  "version": "1.1.0",
-  "description": "Draw LVN zones on TopstepX TradingView charts",
-  "permissions": ["storage", "activeTab"],
+  "version": "2.0.0",
+  "description": "Display NQ LVN zones alongside TopstepX",
+  "permissions": ["storage"],
   "content_scripts": [
     {
       "matches": [
@@ -11,10 +11,6 @@
         "https://*.topstep.com/*",
         "https://*.tradingview.com/*",
         "https://*.trading-tv.com/*",
-        "https://*.projectx.com/*",
-        "https://*.tradovate.com/*",
-        "https://*.tvstatic.net/*",
-        "https://*.innofin.com/*",
         "<all_urls>"
       ],
       "js": ["content.js"],

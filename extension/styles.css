@@ -1,45 +1,165 @@
-/* Priisma LVN Zone Overlay Styles */
+/* Priisma LVN Zones — Floating Panel Styles */
 
-.priisma-zone-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-  overflow: hidden;
+#priisma-panel {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  width: 260px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  z-index: 999999;
+  font-family: 'Segoe UI', -apple-system, sans-serif;
+  font-size: 12px;
+  color: #e0e0e0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  user-select: none;
 }
 
-.priisma-zone {
-  position: absolute;
-  left: 0;
-  right: 60px; /* Leave room for price axis */
-  pointer-events: none;
-  box-sizing: border-box;
+#priisma-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #0d0d1a;
+  border-radius: 8px 8px 0 0;
+  cursor: move;
+  border-bottom: 1px solid #333;
 }
 
-.priisma-zone-band {
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 150, 255, 0.08);
-  border-top: 1px solid rgba(0, 150, 255, 0.4);
-  border-bottom: 1px solid rgba(0, 150, 255, 0.4);
+#priisma-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #0096ff;
 }
 
-.priisma-zone-label {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 9px;
-  color: rgba(0, 150, 255, 0.7);
+#priisma-minimize {
+  cursor: pointer;
+  color: #888;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+#priisma-minimize:hover {
+  color: #fff;
+}
+
+#priisma-body {
+  padding: 10px 12px;
+}
+
+#priisma-price-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+#priisma-price-input {
+  flex: 1;
+  background: #0d0d1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #fff;
+  font-size: 13px;
   font-family: monospace;
-  white-space: nowrap;
-  pointer-events: none;
+  outline: none;
 }
 
-/* Hidden state */
-.priisma-zone-overlay.priisma-hidden {
-  display: none;
+#priisma-price-input:focus {
+  border-color: #0096ff;
+}
+
+#priisma-go {
+  background: #0096ff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#priisma-go:hover {
+  background: #007acc;
+}
+
+#priisma-status {
+  color: #888;
+  font-size: 10px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #222;
+}
+
+#priisma-zones-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.priisma-section-label {
+  color: #666;
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 6px;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.priisma-zone-row {
+  padding: 4px 6px;
+  margin: 2px 0;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.priisma-zone-row.priisma-active {
+  background: rgba(255, 235, 59, 0.15);
+  border-left: 3px solid #ffeb3b;
+  color: #ffeb3b;
+  font-weight: 600;
+}
+
+.priisma-zone-row.priisma-resistance {
+  background: rgba(244, 67, 54, 0.08);
+  border-left: 2px solid rgba(244, 67, 54, 0.5);
+}
+
+.priisma-zone-row.priisma-support {
+  background: rgba(76, 175, 80, 0.08);
+  border-left: 2px solid rgba(76, 175, 80, 0.5);
+}
+
+.priisma-dist {
+  color: #888;
+  font-size: 10px;
+}
+
+.priisma-zone-row.priisma-resistance .priisma-dist {
+  color: rgba(244, 67, 54, 0.7);
+}
+
+.priisma-zone-row.priisma-support .priisma-dist {
+  color: rgba(76, 175, 80, 0.7);
+}
+
+/* Scrollbar */
+#priisma-zones-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+#priisma-zones-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#priisma-zones-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 2px;
 }

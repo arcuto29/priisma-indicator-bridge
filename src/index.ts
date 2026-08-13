@@ -1,25 +1,45 @@
 /**
  * Priisma Indicator Bridge
  *
- * Local indicator calculation and visualization bridge
- * for trading platforms (TopstepX, Tradovate, TradeSea, etc.)
+ * A universal indicator bridge that lets traders use custom indicator logic
+ * across trading platforms that do not natively support TradingView Pine Script.
  *
- * This project does NOT:
- * - Execute trades
- * - Modify orders
- * - Access broker accounts beyond read-only market data
- * - Inject code into trading platforms
- * - Run Pine Script directly
+ * Architecture:
+ *   Indicator Definition
+ *   → Priisma Indicator Engine
+ *   → Normalized Market Data
+ *   → Calculated Indicator Output
+ *   → Platform-Agnostic Visual Layer
+ *   → Supported Trading Platform
  *
- * It DOES:
- * - Calculate indicator levels locally from market data
- * - Display calculated zones in a companion overlay/window
- * - Remain platform-independent
+ * This project is NOT:
+ * - A Pine Script runtime hack
+ * - A broker / execution engine
+ * - An auto-trading system
+ *
+ * It IS:
+ * - A local indicator calculation + visualization bridge
+ * - Platform-independent
+ * - Read-only (no order placement)
  */
 
+// Core engine
 export * from './engine/index.js';
+
+// Indicator SDK
+export * from './sdk/index.js';
+
+// Indicators
 export * from './indicators/index.js';
+
+// Data providers
 export * from './data/index.js';
 
-console.log('Priisma Indicator Bridge v0.1.0');
-console.log('Status: Awaiting Manual Zones Pine Script source for Phase 1');
+// Platform adapters
+export * from './platforms/index.js';
+
+// Pine compatibility
+export * from './pine-compat/index.js';
+
+// Parity testing
+export * from './parity/index.js';

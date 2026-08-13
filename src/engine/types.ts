@@ -23,7 +23,6 @@ export interface Candle {
 
 /**
  * Supported timeframe values.
- * Using string literals for flexibility with different data providers.
  */
 export type Timeframe =
   | '1m'
@@ -52,89 +51,6 @@ export interface SymbolInfo {
   pointValue: number;
   /** Exchange if known */
   exchange?: string;
-}
-
-// ─── Zone Types ──────────────────────────────────────────────────────────────
-
-/**
- * Zone type classification
- */
-export type ZoneType = 'support' | 'resistance';
-
-/**
- * Zone status
- */
-export type ZoneStatus = 'active' | 'invalidated';
-
-/**
- * A calculated zone from the Manual Zones indicator.
- * This is the normalized output format.
- */
-export interface Zone {
-  /** Unique identifier for this zone */
-  id: string;
-  /** Whether this is support or resistance */
-  type: ZoneType;
-  /** Upper boundary of the zone */
-  upper: number;
-  /** Lower boundary of the zone */
-  lower: number;
-  /** Midpoint of the zone */
-  midpoint: number;
-  /** Timestamp when the zone was created (candle timestamp) */
-  createdAt: number;
-  /** Timestamp when the zone was invalidated (null if still active) */
-  invalidatedAt: number | null;
-  /** Current status */
-  status: ZoneStatus;
-  /** Timeframe this zone was calculated from */
-  sourceTimeframe: Timeframe;
-  /** Index of the candle that created this zone (for parity testing) */
-  createdAtIndex: number;
-  /** Index of the candle that invalidated this zone (for parity testing) */
-  invalidatedAtIndex: number | null;
-}
-
-// ─── Indicator Engine Interface ──────────────────────────────────────────────
-
-/**
- * Configuration/inputs for an indicator engine.
- * Each indicator defines its own specific config type.
- */
-export interface IndicatorConfig {
-  [key: string]: unknown;
-}
-
-/**
- * Base interface all indicator engines must implement.
- */
-export interface IndicatorEngine<TConfig extends IndicatorConfig, TOutput> {
-  /** Human-readable indicator name */
-  readonly name: string;
-  /** Current configuration */
-  readonly config: TConfig;
-
-  /**
-   * Reset the engine state (clear all calculated values).
-   */
-  reset(): void;
-
-  /**
-   * Process a single new candle.
-   * Call this sequentially for each candle in order.
-   */
-  processCandle(candle: Candle, index: number): void;
-
-  /**
-   * Process a batch of candles (e.g., historical data load).
-   * Calls processCandle internally for each.
-   */
-  processBatch(candles: Candle[]): void;
-
-  /**
-   * Get current output state.
-   */
-  getOutput(): TOutput;
 }
 
 // ─── Data Provider Types ─────────────────────────────────────────────────────

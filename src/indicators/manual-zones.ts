@@ -1,69 +1,102 @@
 /**
- * Manual Zones Indicator Engine
+ * Manual Zones Indicator — Priisma Native Implementation
  *
  * PLACEHOLDER — awaiting Pine Script source to implement.
  *
  * This file will contain the full TypeScript port of the Manual Zones
  * indicator logic once the Pine Script source is provided and analyzed.
  *
- * The engine will:
- * 1. Accept normalized Candle[] data
- * 2. Apply the same zone detection logic as the Pine Script version
- * 3. Output Zone[] matching TradingView's behavior
+ * Architecture:
+ * - Uses the Priisma SDK defineIndicator() pattern
+ * - Can also be used as a standalone engine class for maximum control
+ * - Both approaches produce the same normalized output
  */
 
-import type { Candle, IndicatorConfig, IndicatorEngine, Zone } from '../engine/types.js';
+import type { Candle } from '../engine/types.js';
+import type { ZonePlot } from '../engine/output.js';
+import { defineIndicator } from '../sdk/define-indicator.js';
+import type { IndicatorDefinition } from '../sdk/define-indicator.js';
+import type { IndicatorInput } from '../engine/inputs.js';
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 /**
- * Manual Zones indicator configuration.
+ * Manual Zones indicator inputs.
  * Will be populated from Pine Script input() declarations.
  */
-export interface ManualZonesConfig extends IndicatorConfig {
+export const MANUAL_ZONES_INPUTS: IndicatorInput[] = [
   // TODO: Extract from Pine Script source
-  // Example expected inputs:
-  // lookback: number;
-  // zoneWidth: number;
-  // maxZones: number;
-  // invalidationMethod: string;
-  // timeframe: Timeframe;
+  // Placeholder inputs — will be replaced with actual Pine inputs
+  {
+    key: 'enabled',
+    label: 'Enabled',
+    type: 'boolean',
+    defaultValue: true,
+    group: 'General',
+  },
+];
+
+// ─── SDK-Based Definition ────────────────────────────────────────────────────
+
+/**
+ * Manual Zones indicator defined using the Priisma SDK.
+ *
+ * STUB — calculate() will be fully implemented after Pine Script analysis.
+ */
+export const manualZonesDefinition: IndicatorDefinition = defineIndicator({
+  name: 'Manual Zones',
+  version: '0.1.0',
+  description: 'Support and resistance zones — ported from Pine Script',
+  overlay: true,
+
+  inputs: MANUAL_ZONES_INPUTS,
+
+  init(ctx) {
+    // Initialize persistent state
+    ctx.state.zones = [];
+    ctx.state.nextZoneId = 0;
+  },
+
+  calculate(_ctx) {
+    // TODO: Implement after Pine Script reverse-engineering
+    //
+    // This function will be called for each candle in sequence.
+    // It should:
+    // 1. Check zone creation conditions
+    // 2. Check zone invalidation conditions
+    // 3. Call ctx.zone() to create new zones
+    // 4. Call ctx.removeZone() to invalidate zones
+    //
+    // The implementation will match the Pine Script logic exactly.
+  },
+});
+
+// ─── Standalone Engine Class ─────────────────────────────────────────────────
+
+/**
+ * Standalone Manual Zones engine for direct use without the SDK runtime.
+ * Useful for parity testing and fine-grained control.
+ */
+export interface ManualZonesConfig {
+  // Will be populated from Pine Script input() declarations
   [key: string]: unknown;
 }
 
-// ─── Output ──────────────────────────────────────────────────────────────────
-
-/**
- * Output from the Manual Zones engine
- */
 export interface ManualZonesOutput {
-  /** All zones (active + invalidated) */
-  allZones: Zone[];
-  /** Currently active zones only */
-  activeZones: Zone[];
-  /** Invalidated zones */
-  invalidatedZones: Zone[];
+  allZones: ZonePlot[];
+  activeZones: ZonePlot[];
+  invalidatedZones: ZonePlot[];
 }
 
-// ─── Engine Implementation ───────────────────────────────────────────────────
-
-/**
- * Manual Zones indicator engine.
- *
- * STUB — will be fully implemented after Pine Script analysis.
- */
-export class ManualZonesEngine implements IndicatorEngine<ManualZonesConfig, ManualZonesOutput> {
+export class ManualZonesEngine {
   readonly name = 'Manual Zones';
   readonly config: ManualZonesConfig;
 
-  private zones: Zone[] = [];
+  private zones: ZonePlot[] = [];
   private candleHistory: Candle[] = [];
 
   constructor(config: Partial<ManualZonesConfig> = {}) {
-    this.config = {
-      // Default config will be set after Pine Script analysis
-      ...config,
-    };
+    this.config = { ...config };
   }
 
   reset(): void {
@@ -73,7 +106,6 @@ export class ManualZonesEngine implements IndicatorEngine<ManualZonesConfig, Man
 
   processCandle(_candle: Candle, _index: number): void {
     // TODO: Implement after Pine Script reverse-engineering
-    // This will contain the core zone detection logic
     this.candleHistory.push(_candle);
   }
 
@@ -85,8 +117,8 @@ export class ManualZonesEngine implements IndicatorEngine<ManualZonesConfig, Man
   }
 
   getOutput(): ManualZonesOutput {
-    const activeZones = this.zones.filter((z) => z.status === 'active');
-    const invalidatedZones = this.zones.filter((z) => z.status === 'invalidated');
+    const activeZones = this.zones.filter((z) => !z.invalidated);
+    const invalidatedZones = this.zones.filter((z) => z.invalidated);
 
     return {
       allZones: [...this.zones],
@@ -97,7 +129,7 @@ export class ManualZonesEngine implements IndicatorEngine<ManualZonesConfig, Man
 }
 
 /**
- * Factory function to create a Manual Zones engine with config
+ * Factory function to create a Manual Zones engine
  */
 export function createManualZonesEngine(config?: Partial<ManualZonesConfig>): ManualZonesEngine {
   return new ManualZonesEngine(config);

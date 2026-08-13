@@ -1,0 +1,45 @@
+/* Priisma LVN Zone Overlay Styles */
+
+.priisma-zone-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.priisma-zone {
+  position: absolute;
+  left: 0;
+  right: 60px; /* Leave room for price axis */
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.priisma-zone-band {
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 150, 255, 0.08);
+  border-top: 1px solid rgba(0, 150, 255, 0.4);
+  border-bottom: 1px solid rgba(0, 150, 255, 0.4);
+}
+
+.priisma-zone-label {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: rgba(0, 150, 255, 0.7);
+  font-family: monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Hidden state */
+.priisma-zone-overlay.priisma-hidden {
+  display: none;
+}

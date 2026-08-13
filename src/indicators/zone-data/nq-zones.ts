@@ -1,7 +1,10 @@
 /**
- * NQ Manual Zones — Static Zone Data
+ * NQ LVN Zones — Low Volume Node Data
  *
- * Pre-defined support/resistance zones for NQ (Nasdaq E-mini Futures).
+ * Pre-defined Low Volume Node zones for NQ (Nasdaq E-mini Futures).
+ * LVNs represent thin areas in the volume profile where minimal volume traded.
+ * Price tends to move through these areas quickly or react/reverse at their edges.
+ *
  * Provided as upper,lower boundary pairs, ordered from highest to lowest.
  */
 

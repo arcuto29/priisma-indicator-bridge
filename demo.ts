@@ -1,7 +1,7 @@
 /**
  * Priisma Indicator Bridge — Demo
  *
- * Shows the Manual Zones engine with FIXED zones.
+ * Shows the LVN Zones engine with FIXED zones.
  * Zones never move, never change. Only price moves through them.
  *
  * Run with: npx tsx demo.ts

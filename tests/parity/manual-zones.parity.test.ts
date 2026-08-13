@@ -1,7 +1,7 @@
 /**
- * Manual Zones Parity Tests
+ * LVN Zones Parity Tests
  *
- * Since Manual Zones is a FIXED zone list, parity means:
+ * Since LVN Zones is a FIXED zone list, parity means:
  * 1. All 148 zones are parsed correctly
  * 2. Zones never change regardless of price
  * 3. Proximity info is correct
@@ -15,7 +15,7 @@ import { createRuntime } from '../../src/sdk/runtime.js';
 import { NQ_ZONES_RAW, NQ_ZONE_COUNT } from '../../src/indicators/zone-data/nq-zones.js';
 import type { Candle } from '../../src/engine/types.js';
 
-describe('Manual Zones - Fixed Zone Integrity', () => {
+describe('LVN Zones - Fixed Zone Integrity', () => {
   describe('Zone Data', () => {
     const zones = parseZoneList(NQ_ZONES_RAW);
 

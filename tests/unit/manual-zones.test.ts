@@ -1,5 +1,5 @@
 /**
- * Unit tests for Manual Zones — static FIXED zone parsing and proximity
+ * Unit tests for LVN Zones — static FIXED zone parsing and proximity
  */
 
 import { describe, it, expect } from 'vitest';
@@ -231,7 +231,7 @@ describe('formatZoneDisplay', () => {
     const result = analyzeProximity(zones, 29900, 3);
     const display = formatZoneDisplay(result, { symbol: 'NQ' });
 
-    expect(display).toContain('NQ Manual Zones');
+    expect(display).toContain('NQ LVN Zones');
     expect(display).toContain('29900.00');
     expect(display).toContain('NEXT ABOVE');
     expect(display).toContain('NEXT BELOW');
@@ -302,7 +302,7 @@ describe('ManualZonesEngine', () => {
     const engine = createManualZonesEngine(NQ_ZONES_RAW);
     const display = engine.display(29900, { symbol: 'NQ' });
 
-    expect(display).toContain('NQ Manual Zones');
+    expect(display).toContain('NQ LVN Zones');
     expect(display).toContain('NEXT ABOVE');
     expect(display).toContain('NEXT BELOW');
   });

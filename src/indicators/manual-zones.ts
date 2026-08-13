@@ -1,14 +1,13 @@
 /**
- * Manual Zones Indicator
+ * Manual Zones Indicator — LVN (Low Volume Nodes)
  *
- * This indicator displays pre-defined FIXED price zones provided by the user.
+ * This indicator displays pre-defined FIXED Low Volume Node zones.
+ * LVNs are thin areas in the volume profile where little volume traded —
+ * price tends to move through them quickly or react at their edges.
+ *
  * These zones are permanent horizontal bands that never move, never reclassify,
- * never invalidate, and never disappear.
- *
- * They are simply static price levels drawn on the chart at all times.
- *
- * Think of them like horizontal lines taped to the chart — price moves through
- * them, but the zones themselves never change.
+ * never invalidate, and never disappear. They are derived from volume profile
+ * analysis and provided as a fixed list.
  */
 
 import type { Color } from '../engine/output.js';
@@ -217,7 +216,7 @@ export function analyzeProximity(
 // ─── Display Formatting ──────────────────────────────────────────────────────
 
 /**
- * Format the fixed zone list as a compact display string.
+ * Format the fixed LVN zone list as a compact display string.
  * Zones are always shown. Price position is informational only.
  */
 export function formatZoneDisplay(
@@ -227,7 +226,7 @@ export function formatZoneDisplay(
   const { symbol = 'NQ', showAll = false, maxDisplay = 20 } = options;
   const lines: string[] = [];
 
-  lines.push(`═══ ${symbol} Manual Zones ═══`);
+  lines.push(`═══ ${symbol} LVN Zones ═══`);
   lines.push(`Price: ${result.currentPrice.toFixed(2)}`);
   lines.push('');
 
@@ -307,9 +306,9 @@ export const MANUAL_ZONES_INPUTS: IndicatorInput[] = [
  * Displays static pre-defined zones with classification relative to current price.
  */
 export const manualZonesDefinition: IndicatorDefinition = defineIndicator({
-  name: 'Manual Zones',
+  name: 'LVN Zones',
   version: '1.0.0',
-  description: 'Static support/resistance zones from a pre-defined zone list',
+  description: 'Fixed Low Volume Node zones from volume profile analysis',
   overlay: true,
 
   inputs: MANUAL_ZONES_INPUTS,
@@ -345,7 +344,7 @@ export const manualZonesDefinition: IndicatorDefinition = defineIndicator({
  * Simpler than the full SDK runtime — just manages zones and proximity.
  */
 export class ManualZonesEngine {
-  readonly name = 'Manual Zones';
+  readonly name = 'LVN Zones';
   private zones: StaticZone[] = [];
 
   constructor(zoneData?: string | Array<[number, number]>) {

@@ -1,15 +1,14 @@
 /**
  * Manual Zones Indicator
  *
- * This indicator displays pre-defined static price zones provided by the user.
- * These zones represent support/resistance levels that are NOT calculated from
- * price action — they are a fixed grid of levels provided externally.
+ * This indicator displays pre-defined FIXED price zones provided by the user.
+ * These zones are permanent horizontal bands that never move, never reclassify,
+ * never invalidate, and never disappear.
  *
- * The indicator:
- * 1. Parses a zone list (upper,lower per line)
- * 2. Classifies zones as support/resistance relative to current price
- * 3. Displays them with proximity awareness
- * 4. Highlights the nearest zones above and below price
+ * They are simply static price levels drawn on the chart at all times.
+ *
+ * Think of them like horizontal lines taped to the chart — price moves through
+ * them, but the zones themselves never change.
  */
 
 import type { Color } from '../engine/output.js';
@@ -38,11 +37,12 @@ export interface StaticZone {
 }
 
 /**
- * Zone classified relative to current price
+ * Zone with distance info relative to current price.
+ * NOTE: The zone itself does NOT change. Only the distance is calculated.
  */
 export interface ClassifiedZone extends StaticZone {
-  /** Support (below price) or resistance (above price) */
-  type: 'support' | 'resistance' | 'active';
+  /** Position relative to price (for display convenience only — zone stays fixed) */
+  position: 'above' | 'below' | 'containing';
   /** Distance from current price to zone midpoint */
   distanceFromPrice: number;
   /** Whether this is one of the nearest zones to current price */
@@ -50,18 +50,19 @@ export interface ClassifiedZone extends StaticZone {
 }
 
 /**
- * Proximity analysis result
+ * Proximity analysis result.
+ * Zones are FIXED — this just tells you where price is relative to them.
  */
 export interface ZoneProximityResult {
-  /** All classified zones */
+  /** All zones (always the same, never changes) */
   zones: ClassifiedZone[];
-  /** Nearest resistance zone(s) above price */
-  nearestResistance: ClassifiedZone[];
-  /** Nearest support zone(s) below price */
-  nearestSupport: ClassifiedZone[];
+  /** Nearest zone(s) above price */
+  nearestAbove: ClassifiedZone[];
+  /** Nearest zone(s) below price */
+  nearestBelow: ClassifiedZone[];
   /** Zone that price is currently inside (if any) */
-  activeZone: ClassifiedZone | null;
-  /** Current price used for classification */
+  containingZone: ClassifiedZone | null;
+  /** Current price used for distance calculation */
   currentPrice: number;
 }
 
@@ -132,34 +133,31 @@ export function parseZoneArray(data: Array<[number, number]>): StaticZone[] {
   });
 }
 
-// ─── Zone Classification ─────────────────────────────────────────────────────
+// ─── Zone Position Relative to Price ─────────────────────────────────────────
 
 /**
- * Classify zones as support/resistance relative to current price.
- *
- * - Resistance: zone is above current price (zone.lower > price)
- * - Support: zone is below current price (zone.upper < price)
- * - Active: price is currently inside the zone
+ * Calculate where price is relative to each fixed zone.
+ * The zones themselves NEVER change — only the distance/position info updates.
  */
 export function classifyZones(zones: StaticZone[], currentPrice: number): ClassifiedZone[] {
   return zones.map((zone) => {
-    let type: 'support' | 'resistance' | 'active';
+    let position: 'above' | 'below' | 'containing';
 
     if (currentPrice >= zone.lower && currentPrice <= zone.upper) {
-      type = 'active';
+      position = 'containing';
     } else if (zone.lower > currentPrice) {
-      type = 'resistance';
+      position = 'above';
     } else {
-      type = 'support';
+      position = 'below';
     }
 
     const distanceFromPrice = Math.abs(zone.midpoint - currentPrice);
 
     return {
       ...zone,
-      type,
+      position,
       distanceFromPrice,
-      isNearest: false, // will be set by proximity analysis
+      isNearest: false,
     };
   });
 }
@@ -167,10 +165,11 @@ export function classifyZones(zones: StaticZone[], currentPrice: number): Classi
 // ─── Zone Proximity ──────────────────────────────────────────────────────────
 
 /**
- * Perform full proximity analysis on zones relative to current price.
+ * Find where price is relative to the fixed zones.
+ * Zones NEVER move — this just calculates distances.
  *
- * @param zones - Parsed static zones
- * @param currentPrice - Current market price
+ * @param zones - Fixed zone list (never changes)
+ * @param currentPrice - Where price is right now
  * @param nearestCount - How many nearest zones to highlight above/below (default: 3)
  */
 export function analyzeProximity(
@@ -180,37 +179,37 @@ export function analyzeProximity(
 ): ZoneProximityResult {
   const classified = classifyZones(zones, currentPrice);
 
-  // Find nearest resistance (above price, sorted by distance ascending)
-  const resistanceZones = classified
-    .filter((z) => z.type === 'resistance')
+  // Find nearest zones above price (sorted by distance ascending)
+  const aboveZones = classified
+    .filter((z) => z.position === 'above')
     .sort((a, b) => a.distanceFromPrice - b.distanceFromPrice);
 
-  const nearestResistance = resistanceZones.slice(0, nearestCount);
-  for (const z of nearestResistance) {
+  const nearestAbove = aboveZones.slice(0, nearestCount);
+  for (const z of nearestAbove) {
     z.isNearest = true;
   }
 
-  // Find nearest support (below price, sorted by distance ascending)
-  const supportZones = classified
-    .filter((z) => z.type === 'support')
+  // Find nearest zones below price (sorted by distance ascending)
+  const belowZones = classified
+    .filter((z) => z.position === 'below')
     .sort((a, b) => a.distanceFromPrice - b.distanceFromPrice);
 
-  const nearestSupport = supportZones.slice(0, nearestCount);
-  for (const z of nearestSupport) {
+  const nearestBelow = belowZones.slice(0, nearestCount);
+  for (const z of nearestBelow) {
     z.isNearest = true;
   }
 
-  // Find active zone (price is inside)
-  const activeZone = classified.find((z) => z.type === 'active') ?? null;
-  if (activeZone) {
-    activeZone.isNearest = true;
+  // Find containing zone (price is inside)
+  const containingZone = classified.find((z) => z.position === 'containing') ?? null;
+  if (containingZone) {
+    containingZone.isNearest = true;
   }
 
   return {
     zones: classified,
-    nearestResistance,
-    nearestSupport,
-    activeZone,
+    nearestAbove,
+    nearestBelow,
+    containingZone,
     currentPrice,
   };
 }
@@ -218,8 +217,8 @@ export function analyzeProximity(
 // ─── Display Formatting ──────────────────────────────────────────────────────
 
 /**
- * Format the zone proximity result as a compact display string.
- * This is what the companion UI will show.
+ * Format the fixed zone list as a compact display string.
+ * Zones are always shown. Price position is informational only.
  */
 export function formatZoneDisplay(
   result: ZoneProximityResult,
@@ -232,44 +231,43 @@ export function formatZoneDisplay(
   lines.push(`Price: ${result.currentPrice.toFixed(2)}`);
   lines.push('');
 
-  // Active zone
-  if (result.activeZone) {
+  // Show if price is inside a zone
+  if (result.containingZone) {
     lines.push('▶ IN ZONE:');
-    lines.push(`  ${result.activeZone.upper.toFixed(2)} – ${result.activeZone.lower.toFixed(2)}`);
+    lines.push(`  ${result.containingZone.upper.toFixed(2)} – ${result.containingZone.lower.toFixed(2)}`);
     lines.push('');
   }
 
-  // Nearest resistance (ascending from price)
-  if (result.nearestResistance.length > 0) {
-    lines.push('▲ RESISTANCE (nearest above):');
-    for (const z of result.nearestResistance) {
+  // Nearest zones above price
+  if (result.nearestAbove.length > 0) {
+    lines.push('▲ NEXT ABOVE:');
+    for (const z of result.nearestAbove) {
       const dist = (z.lower - result.currentPrice).toFixed(2);
       lines.push(`  ${z.upper.toFixed(2)} – ${z.lower.toFixed(2)}  (+${dist})`);
     }
     lines.push('');
   }
 
-  // Nearest support (ascending from price = closest first)
-  if (result.nearestSupport.length > 0) {
-    lines.push('▼ SUPPORT (nearest below):');
-    for (const z of result.nearestSupport) {
+  // Nearest zones below price
+  if (result.nearestBelow.length > 0) {
+    lines.push('▼ NEXT BELOW:');
+    for (const z of result.nearestBelow) {
       const dist = (result.currentPrice - z.upper).toFixed(2);
       lines.push(`  ${z.upper.toFixed(2)} – ${z.lower.toFixed(2)}  (-${dist})`);
     }
     lines.push('');
   }
 
-  // Show all zones if requested
+  // Show all zones if requested (they're always fixed)
   if (showAll) {
-    lines.push('─── All Zones ───');
+    lines.push('─── All Zones (fixed) ───');
     const displayZones = result.zones
       .sort((a, b) => b.upper - a.upper)
       .slice(0, maxDisplay);
 
     for (const z of displayZones) {
       const marker = z.isNearest ? '→' : ' ';
-      const typeChar = z.type === 'resistance' ? 'R' : z.type === 'support' ? 'S' : 'A';
-      lines.push(`${marker} [${typeChar}] ${z.upper.toFixed(2)} – ${z.lower.toFixed(2)}`);
+      lines.push(`${marker} ${z.upper.toFixed(2)} – ${z.lower.toFixed(2)}`);
     }
 
     if (result.zones.length > maxDisplay) {
@@ -295,47 +293,10 @@ export const MANUAL_ZONES_INPUTS: IndicatorInput[] = [
     group: 'Zones',
   },
   {
-    key: 'nearestCount',
-    label: 'Nearest Zones to Highlight',
-    type: 'integer',
-    defaultValue: 3,
-    minValue: 1,
-    maxValue: 10,
-    group: 'Display',
-  },
-  {
-    key: 'showResistance',
-    label: 'Show Resistance',
-    type: 'boolean',
-    defaultValue: true,
-    group: 'Display',
-  },
-  {
-    key: 'showSupport',
-    label: 'Show Support',
-    type: 'boolean',
-    defaultValue: true,
-    group: 'Display',
-  },
-  {
-    key: 'resistanceColor',
-    label: 'Resistance Color',
+    key: 'zoneColor',
+    label: 'Zone Color',
     type: 'color',
-    defaultValue: { r: 244, g: 67, b: 54, a: 0.25 },
-    group: 'Style',
-  },
-  {
-    key: 'supportColor',
-    label: 'Support Color',
-    type: 'color',
-    defaultValue: { r: 76, g: 175, b: 80, a: 0.25 },
-    group: 'Style',
-  },
-  {
-    key: 'activeColor',
-    label: 'Active Zone Color',
-    type: 'color',
-    defaultValue: { r: 255, g: 235, b: 59, a: 0.35 },
+    defaultValue: { r: 33, g: 150, b: 243, a: 0.2 },
     group: 'Style',
   },
 ];
@@ -361,43 +322,17 @@ export const manualZonesDefinition: IndicatorDefinition = defineIndicator({
 
   calculate(ctx) {
     const zones = ctx.state.zones as StaticZone[];
-    const nearestCount = ctx.inputs.nearestCount as number;
-    const showResistance = ctx.inputs.showResistance as boolean;
-    const showSupport = ctx.inputs.showSupport as boolean;
-    const resistanceColor = ctx.inputs.resistanceColor as Color;
-    const supportColor = ctx.inputs.supportColor as Color;
-    const activeColor = ctx.inputs.activeColor as Color;
+    const zoneColor = ctx.inputs.zoneColor as Color;
 
     if (zones.length === 0) return;
 
-    // Only render zones on the last bar (they're static — only classification changes)
-    if (!ctx.isLast) return;
+    // Render ALL zones on the first bar — they are FIXED and never change.
+    if (!ctx.isFirst) return;
 
-    const proximity = analyzeProximity(zones, ctx.close, nearestCount);
-
-    // Render each zone
-    for (const zone of proximity.zones) {
-      // Filter by type visibility
-      if (zone.type === 'resistance' && !showResistance) continue;
-      if (zone.type === 'support' && !showSupport) continue;
-
-      let color: Color;
-      if (zone.type === 'active') {
-        color = activeColor;
-      } else if (zone.type === 'resistance') {
-        color = zone.isNearest
-          ? { ...resistanceColor, a: Math.min(1, resistanceColor.a * 2) }
-          : resistanceColor;
-      } else {
-        color = zone.isNearest
-          ? { ...supportColor, a: Math.min(1, supportColor.a * 2) }
-          : supportColor;
-      }
-
+    for (const zone of zones) {
       ctx.zone(zone.id, zone.upper, zone.lower, {
-        type: zone.type === 'active' ? 'support' : zone.type,
-        color,
-        label: zone.isNearest ? `${zone.upper.toFixed(2)}–${zone.lower.toFixed(2)}` : undefined,
+        type: 'neutral',
+        color: zoneColor,
       });
     }
   },

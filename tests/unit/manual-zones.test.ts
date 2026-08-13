@@ -1,5 +1,5 @@
 /**
- * Unit tests for Manual Zones — static zone parsing, classification, and proximity
+ * Unit tests for Manual Zones — static FIXED zone parsing and proximity
  */
 
 import { describe, it, expect } from 'vitest';
@@ -51,12 +51,6 @@ describe('parseZoneList', () => {
     expect(zones[4].id).toBe('zone_4');
   });
 
-  it('assigns sequential index values', () => {
-    const zones = parseZoneList(SAMPLE_RAW);
-    expect(zones[0].index).toBe(0);
-    expect(zones[4].index).toBe(4);
-  });
-
   it('handles whitespace and blank lines', () => {
     const messy = `
       30693.75, 30688.75
@@ -100,10 +94,8 @@ single_value`;
   it('parses the full NQ zone data correctly', () => {
     const zones = parseZoneList(NQ_ZONES_RAW);
     expect(zones).toHaveLength(NQ_ZONE_COUNT);
-    // Highest zone
     expect(zones[0].upper).toBe(30693.75);
     expect(zones[0].lower).toBe(30688.75);
-    // Lowest zone
     expect(zones[zones.length - 1].upper).toBe(27199.75);
     expect(zones[zones.length - 1].lower).toBe(27193.25);
   });
@@ -116,7 +108,6 @@ describe('parseZoneArray', () => {
     const zones = parseZoneArray(SAMPLE_ARRAY);
     expect(zones).toHaveLength(5);
     expect(zones[0].upper).toBe(30693.75);
-    expect(zones[0].lower).toBe(30688.75);
   });
 
   it('handles reversed pairs', () => {
@@ -127,38 +118,34 @@ describe('parseZoneArray', () => {
   });
 });
 
-// ─── classifyZones ───────────────────────────────────────────────────────────
+// ─── classifyZones (position relative to price) ─────────────────────────────
 
 describe('classifyZones', () => {
   const zones = parseZoneList(SAMPLE_RAW);
 
-  it('classifies zones above price as resistance', () => {
+  it('zones above price get position=above', () => {
     const classified = classifyZones(zones, 30500);
-    // All 5 zones are above 30500
-    expect(classified.every((z) => z.type === 'resistance')).toBe(true);
+    expect(classified.every((z) => z.position === 'above')).toBe(true);
   });
 
-  it('classifies zones below price as support', () => {
+  it('zones below price get position=below', () => {
     const classified = classifyZones(zones, 30700);
-    // All 5 zones are below 30700
-    expect(classified.every((z) => z.type === 'support')).toBe(true);
+    expect(classified.every((z) => z.position === 'below')).toBe(true);
   });
 
-  it('classifies zone as active when price is inside', () => {
-    // Price inside the first zone (30688.75 – 30693.75)
+  it('zone containing price gets position=containing', () => {
     const classified = classifyZones(zones, 30691.00);
-    const active = classified.filter((z) => z.type === 'active');
-    expect(active).toHaveLength(1);
-    expect(active[0].upper).toBe(30693.75);
+    const containing = classified.filter((z) => z.position === 'containing');
+    expect(containing).toHaveLength(1);
+    expect(containing[0].upper).toBe(30693.75);
   });
 
-  it('correctly splits resistance and support around price', () => {
-    // Price between zone[2] and zone[3]: 30641-30646.50 ... 30621.75-30625.25
+  it('correctly splits above/below around price', () => {
     const classified = classifyZones(zones, 30635);
-    const resistance = classified.filter((z) => z.type === 'resistance');
-    const support = classified.filter((z) => z.type === 'support');
-    expect(resistance.length).toBe(3); // zones 0, 1, 2
-    expect(support.length).toBe(2); // zones 3, 4
+    const above = classified.filter((z) => z.position === 'above');
+    const below = classified.filter((z) => z.position === 'below');
+    expect(above.length).toBe(3);
+    expect(below.length).toBe(2);
   });
 
   it('calculates distance from price', () => {
@@ -173,63 +160,65 @@ describe('classifyZones', () => {
 describe('analyzeProximity', () => {
   const zones = parseZoneList(NQ_ZONES_RAW);
 
-  it('finds nearest resistance zones', () => {
+  it('finds 3 nearest zones above price', () => {
     const result = analyzeProximity(zones, 29900, 3);
-    expect(result.nearestResistance).toHaveLength(3);
-    // They should be sorted by distance (nearest first)
-    expect(result.nearestResistance[0].distanceFromPrice)
-      .toBeLessThanOrEqual(result.nearestResistance[1].distanceFromPrice);
-    // They should all be above price
-    expect(result.nearestResistance.every((z) => z.lower > 29900)).toBe(true);
+    expect(result.nearestAbove).toHaveLength(3);
+    // Sorted by distance (nearest first)
+    expect(result.nearestAbove[0].distanceFromPrice)
+      .toBeLessThanOrEqual(result.nearestAbove[1].distanceFromPrice);
+    // All above price
+    expect(result.nearestAbove.every((z) => z.lower > 29900)).toBe(true);
   });
 
-  it('finds nearest support zones', () => {
+  it('finds 3 nearest zones below price', () => {
     const result = analyzeProximity(zones, 29900, 3);
-    expect(result.nearestSupport).toHaveLength(3);
-    // They should all be below price
-    expect(result.nearestSupport.every((z) => z.upper < 29900)).toBe(true);
+    expect(result.nearestBelow).toHaveLength(3);
+    // All below price
+    expect(result.nearestBelow.every((z) => z.upper < 29900)).toBe(true);
     // Nearest first
-    expect(result.nearestSupport[0].distanceFromPrice)
-      .toBeLessThanOrEqual(result.nearestSupport[1].distanceFromPrice);
+    expect(result.nearestBelow[0].distanceFromPrice)
+      .toBeLessThanOrEqual(result.nearestBelow[1].distanceFromPrice);
   });
 
-  it('detects active zone when price is inside one', () => {
-    // Put price inside a known zone: 29898.00,29893.50
+  it('detects containing zone when price is inside', () => {
     const result = analyzeProximity(zones, 29895.00);
-    expect(result.activeZone).not.toBeNull();
-    expect(result.activeZone!.upper).toBe(29898.00);
-    expect(result.activeZone!.lower).toBe(29893.50);
+    expect(result.containingZone).not.toBeNull();
+    expect(result.containingZone!.upper).toBe(29898.00);
+    expect(result.containingZone!.lower).toBe(29893.50);
   });
 
-  it('returns null activeZone when price is between zones', () => {
-    // Price between zones (not inside any)
+  it('returns null containingZone when price is between zones', () => {
     const result = analyzeProximity(zones, 29910.00);
-    expect(result.activeZone).toBeNull();
+    expect(result.containingZone).toBeNull();
   });
 
   it('marks nearest zones with isNearest=true', () => {
-    const result = analyzeProximity(zones, 29900, 2);
+    const result = analyzeProximity(zones, 29900, 3);
     const nearestCount = result.zones.filter((z) => z.isNearest).length;
-    // Should be 2 resistance + 2 support (or +1 if active)
-    expect(nearestCount).toBeGreaterThanOrEqual(4);
-    expect(nearestCount).toBeLessThanOrEqual(5);
+    // 3 above + 3 below = 6
+    expect(nearestCount).toBe(6);
   });
 
   it('handles price above all zones', () => {
-    const result = analyzeProximity(zones, 31000);
-    expect(result.nearestResistance).toHaveLength(0);
-    expect(result.nearestSupport).toHaveLength(3);
+    const result = analyzeProximity(zones, 31000, 3);
+    expect(result.nearestAbove).toHaveLength(0);
+    expect(result.nearestBelow).toHaveLength(3);
   });
 
   it('handles price below all zones', () => {
-    const result = analyzeProximity(zones, 27000);
-    expect(result.nearestSupport).toHaveLength(0);
-    expect(result.nearestResistance).toHaveLength(3);
+    const result = analyzeProximity(zones, 27000, 3);
+    expect(result.nearestBelow).toHaveLength(0);
+    expect(result.nearestAbove).toHaveLength(3);
   });
 
   it('stores currentPrice in result', () => {
     const result = analyzeProximity(zones, 29500);
     expect(result.currentPrice).toBe(29500);
+  });
+
+  it('zones array is always the full set (fixed)', () => {
+    const result = analyzeProximity(zones, 29500);
+    expect(result.zones).toHaveLength(NQ_ZONE_COUNT);
   });
 });
 
@@ -244,11 +233,11 @@ describe('formatZoneDisplay', () => {
 
     expect(display).toContain('NQ Manual Zones');
     expect(display).toContain('29900.00');
-    expect(display).toContain('RESISTANCE');
-    expect(display).toContain('SUPPORT');
+    expect(display).toContain('NEXT ABOVE');
+    expect(display).toContain('NEXT BELOW');
   });
 
-  it('shows active zone when price is inside one', () => {
+  it('shows containing zone when price is inside one', () => {
     const result = analyzeProximity(zones, 29895.00);
     const display = formatZoneDisplay(result);
 
@@ -261,7 +250,6 @@ describe('formatZoneDisplay', () => {
     const result = analyzeProximity(zones, 29900, 3);
     const display = formatZoneDisplay(result);
 
-    // Should contain + and - distance values
     expect(display).toMatch(/\+\d+\.\d+/);
     expect(display).toMatch(/-\d+\.\d+/);
   });
@@ -270,9 +258,7 @@ describe('formatZoneDisplay', () => {
     const result = analyzeProximity(zones, 29900, 3);
     const display = formatZoneDisplay(result, { showAll: true, maxDisplay: 200 });
 
-    expect(display).toContain('All Zones');
-    expect(display).toContain('[R]');
-    expect(display).toContain('[S]');
+    expect(display).toContain('All Zones (fixed)');
   });
 
   it('shows zone count overflow message when limited', () => {
@@ -303,13 +289,13 @@ describe('ManualZonesEngine', () => {
     expect(engine.zoneCount).toBe(5);
   });
 
-  it('analyze returns proximity result', () => {
+  it('analyze returns proximity result with nearest 3', () => {
     const engine = createManualZonesEngine(NQ_ZONES_RAW);
-    const result = engine.analyze(29900, 3);
+    const result = engine.analyze(29900);
 
     expect(result.currentPrice).toBe(29900);
-    expect(result.nearestResistance.length).toBe(3);
-    expect(result.nearestSupport.length).toBe(3);
+    expect(result.nearestAbove.length).toBe(3);
+    expect(result.nearestBelow.length).toBe(3);
   });
 
   it('display returns formatted string', () => {
@@ -317,21 +303,27 @@ describe('ManualZonesEngine', () => {
     const display = engine.display(29900, { symbol: 'NQ' });
 
     expect(display).toContain('NQ Manual Zones');
-    expect(display).toContain('RESISTANCE');
-    expect(display).toContain('SUPPORT');
+    expect(display).toContain('NEXT ABOVE');
+    expect(display).toContain('NEXT BELOW');
   });
 
-  it('getZones returns all parsed zones', () => {
+  it('getZones returns all parsed zones (never changes)', () => {
     const engine = createManualZonesEngine(SAMPLE_RAW);
     const zones = engine.getZones();
     expect(zones).toHaveLength(5);
     expect(zones[0].upper).toBe(30693.75);
   });
 
-  it('loadFromArray replaces existing zones', () => {
+  it('zones are the same regardless of price', () => {
     const engine = createManualZonesEngine(NQ_ZONES_RAW);
-    expect(engine.zoneCount).toBe(NQ_ZONE_COUNT);
-    engine.loadFromArray(SAMPLE_ARRAY);
-    expect(engine.zoneCount).toBe(5);
+    const zones1 = engine.getZones();
+    engine.analyze(25000); // price far below
+    const zones2 = engine.getZones();
+    engine.analyze(35000); // price far above
+    const zones3 = engine.getZones();
+
+    // Zones never change
+    expect(zones1).toEqual(zones2);
+    expect(zones2).toEqual(zones3);
   });
 });

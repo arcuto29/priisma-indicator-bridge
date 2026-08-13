@@ -182,32 +182,50 @@ const MAX_RETRIES = 60; // Try for 60 seconds
 
 /**
  * Find the TradingView chart container on the page.
- * TopstepX embeds TradingView in an iframe or directly.
+ * TopstepX embeds TradingView in an iframe — with all_frames:true we run inside it.
  */
 function findChartContainer() {
-  // Try common TradingView selectors
+  // Try common TradingView selectors (most specific first)
   const selectors = [
-    '.chart-container',
+    '.chart-markup-table',
     '.layout__area--center',
+    '.chart-container',
     '[class*="chart-container"]',
     '[class*="chartContainer"]',
     '.tv-chart-container',
     '#tv_chart_container',
+    '[class*="chart-gui-wrapper"]',
+    '[class*="chart-widget"]',
+    '.chart-controls-bar',
     '[data-name="legend"]',
-    '.chart-markup-table',
   ];
 
   for (const sel of selectors) {
     const el = document.querySelector(sel);
-    if (el) return el;
+    if (el) {
+      console.log(`[Priisma] Found chart via selector: ${sel}`);
+      return el.closest('[class*="chart"]') || el.parentElement || el;
+    }
   }
 
-  // Try finding the main canvas (TradingView renders to canvas)
+  // Try finding any large canvas (TradingView renders to canvas)
   const canvases = document.querySelectorAll('canvas');
   for (const canvas of canvases) {
-    if (canvas.width > 400 && canvas.height > 200) {
-      return canvas.parentElement;
+    if (canvas.width > 300 && canvas.height > 150) {
+      console.log(`[Priisma] Found chart via canvas (${canvas.width}x${canvas.height})`);
+      // Walk up to find a suitable container
+      let container = canvas.parentElement;
+      while (container && container.clientHeight < 200) {
+        container = container.parentElement;
+      }
+      return container || canvas.parentElement;
     }
+  }
+
+  // Last resort: use the body/document if this page looks like a chart
+  if (document.querySelector('canvas') || document.querySelector('[class*="chart"]')) {
+    console.log('[Priisma] Using body as fallback container');
+    return document.body;
   }
 
   return null;
@@ -238,60 +256,76 @@ function findPriceScale() {
  * Reads the text content of price labels on the Y axis.
  */
 function getPriceRange() {
-  // Strategy 1: Find price labels on the axis
-  const priceLabels = document.querySelectorAll(
-    '[class*="priceAxis"] [class*="label"], ' +
-    '[class*="price-axis"] span, ' +
-    '.price-axis span'
-  );
-
-  if (priceLabels.length >= 2) {
-    const prices = [];
-    for (const label of priceLabels) {
-      const text = label.textContent.trim().replace(/[^0-9.]/g, '');
-      const price = parseFloat(text);
-      if (!isNaN(price) && price > 1000) {
-        prices.push(price);
-      }
-    }
-    if (prices.length >= 2) {
-      return {
-        high: Math.max(...prices),
-        low: Math.min(...prices),
-      };
-    }
-  }
-
-  // Strategy 2: Look for any elements with price-like values near the right edge
-  const rightSideElements = document.querySelectorAll(
-    '[class*="price"] span, [class*="axis"] span, [class*="scale"] span'
-  );
-
+  // Strategy 1: Find ALL text elements that look like NQ prices (27000-31000 range)
+  const allElements = document.querySelectorAll('span, div, text');
   const prices = [];
-  for (const el of rightSideElements) {
-    const text = el.textContent.trim().replace(/[^0-9.]/g, '');
-    const price = parseFloat(text);
-    if (!isNaN(price) && price > 20000 && price < 40000) {
-      prices.push(price);
+
+  for (const el of allElements) {
+    // Skip if element has children (only want leaf text nodes)
+    if (el.children.length > 2) continue;
+
+    const text = (el.textContent || '').trim();
+    // Match NQ-style prices: 5 digits, optional decimal
+    const match = text.match(/^(\d{4,5}(?:\.\d{1,2})?)$/);
+    if (match) {
+      const price = parseFloat(match[1]);
+      if (price >= 25000 && price <= 35000) {
+        // Check if this element is positioned on the right side (price axis)
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.width < 100) {
+          prices.push({ price, y: rect.top + rect.height / 2 });
+        }
+      }
     }
   }
 
   if (prices.length >= 2) {
-    return {
-      high: Math.max(...prices),
-      low: Math.min(...prices),
-    };
+    // Sort by Y position
+    prices.sort((a, b) => a.y - b.y);
+    // Top of screen = highest price, bottom = lowest price
+    const topPrice = prices[0].price;
+    const bottomPrice = prices[prices.length - 1].price;
+
+    // Determine which direction (top=high or top=low)
+    let high, low;
+    if (topPrice > bottomPrice) {
+      high = topPrice;
+      low = bottomPrice;
+    } else {
+      high = bottomPrice;
+      low = topPrice;
+    }
+
+    console.log(`[Priisma] Price range detected: ${low.toFixed(2)} – ${high.toFixed(2)} from ${prices.length} labels`);
+    return { high, low, labels: prices };
   }
 
-  // Strategy 3: Try to read from the crosshair/cursor price display
-  const crosshairPrice = document.querySelector(
-    '[class*="crosshair"] [class*="price"], [class*="cursor"] [class*="price"]'
-  );
-  if (crosshairPrice) {
-    const price = parseFloat(crosshairPrice.textContent.replace(/[^0-9.]/g, ''));
-    if (!isNaN(price) && price > 20000) {
-      // Estimate a range around the crosshair price
-      return { high: price + 50, low: price - 50 };
+  // Strategy 2: Look specifically for TradingView price axis classes
+  const priceAxisSelectors = [
+    '[class*="priceAxis"] [class*="label"]',
+    '[class*="price-axis"] span',
+    '[class*="pane-"] [class*="label"]',
+    '[class*="price"] [class*="value"]',
+    '.price-axis span',
+  ];
+
+  for (const sel of priceAxisSelectors) {
+    const elements = document.querySelectorAll(sel);
+    const axisPrices = [];
+    for (const el of elements) {
+      const text = el.textContent.trim().replace(/[^0-9.]/g, '');
+      const price = parseFloat(text);
+      if (!isNaN(price) && price >= 25000 && price <= 35000) {
+        const rect = el.getBoundingClientRect();
+        axisPrices.push({ price, y: rect.top + rect.height / 2 });
+      }
+    }
+    if (axisPrices.length >= 2) {
+      axisPrices.sort((a, b) => a.y - b.y);
+      const high = Math.max(...axisPrices.map(p => p.price));
+      const low = Math.min(...axisPrices.map(p => p.price));
+      console.log(`[Priisma] Price range from axis (${sel}): ${low} – ${high}`);
+      return { high, low, labels: axisPrices };
     }
   }
 
@@ -370,26 +404,36 @@ function drawZones() {
   const rect = chartContainer.getBoundingClientRect();
   const chartHeight = rect.height;
 
+  if (chartHeight < 100) return; // Chart not visible yet
+
   // Get visible price range
-  const priceRange = getPriceRange();
+  let priceRange = getPriceRange();
   if (!priceRange) {
     // Can't determine price range yet — try using a fallback
     const headerPrice = getPriceFromHeader();
     if (!headerPrice) {
-      console.log('[Priisma] Cannot determine price range yet, retrying...');
+      // Don't log every 2s, just once
+      if (!drawZones._loggedNoRange) {
+        console.log('[Priisma] Cannot determine price range yet, will keep retrying...');
+        drawZones._loggedNoRange = true;
+      }
       return;
     }
+    drawZones._loggedNoRange = false;
     // Use header price with estimated range based on chart height
-    // Assume ~100-200 point visible range for NQ on typical chart
-    const estimatedRange = 150;
+    const estimatedRange = 200;
     priceRange = {
       high: headerPrice + estimatedRange / 2,
       low: headerPrice - estimatedRange / 2,
     };
+  } else {
+    drawZones._loggedNoRange = false;
   }
 
   const { high, low } = priceRange;
   const pricePerPixel = (high - low) / chartHeight;
+
+  if (pricePerPixel <= 0) return;
 
   // Clear existing zones
   overlay.innerHTML = '';
@@ -397,12 +441,12 @@ function drawZones() {
   // Draw each zone that's in the visible range
   let drawnCount = 0;
   for (const [upper, lower] of NQ_ZONES) {
-    // Skip zones outside visible range
-    if (lower > high || upper < low) continue;
+    // Skip zones outside visible range (with some padding)
+    if (lower > high + 20 || upper < low - 20) continue;
 
     // Calculate pixel positions (top of chart = highest price)
-    const topPx = Math.max(0, (high - upper) / pricePerPixel);
-    const bottomPx = Math.min(chartHeight, (high - lower) / pricePerPixel);
+    const topPx = (high - upper) / pricePerPixel;
+    const bottomPx = (high - lower) / pricePerPixel;
     const heightPx = bottomPx - topPx;
 
     if (heightPx < 0.5) continue; // Too small to see
@@ -418,7 +462,7 @@ function drawZones() {
     zoneEl.appendChild(bandEl);
 
     // Add label for wider zones
-    if (heightPx > 8) {
+    if (heightPx > 6) {
       const labelEl = document.createElement('div');
       labelEl.className = 'priisma-zone-label';
       labelEl.textContent = `${upper.toFixed(2)}`;
@@ -429,7 +473,9 @@ function drawZones() {
     drawnCount++;
   }
 
-  console.log(`[Priisma] Drew ${drawnCount} LVN zones (visible range: ${low.toFixed(2)} – ${high.toFixed(2)})`);
+  if (drawnCount > 0) {
+    console.log(`[Priisma] Drew ${drawnCount} LVN zones (visible: ${low.toFixed(0)} – ${high.toFixed(0)})`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

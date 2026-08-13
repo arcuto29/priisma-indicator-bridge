@@ -174,6 +174,7 @@ let overlay = null;
 let chartContainer = null;
 let isEnabled = true;
 let retryCount = 0;
+let lastKnownPrice = null;
 const MAX_RETRIES = 60; // Try for 60 seconds
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -337,24 +338,41 @@ function getPriceRange() {
  * the price axis rendering. Uses the last known price from the chart header.
  */
 function getPriceFromHeader() {
-  // TradingView often shows the current price in the chart header
+  // TradingView shows the current price in the chart header/legend
   const headerSelectors = [
     '[class*="headerRow"] [class*="last"]',
     '[class*="header"] [class*="price"]',
     '[class*="legendValue"]',
     '[class*="item-value"]',
     '.tv-symbol-price-quote__value',
+    '[class*="lastPrice"]',
+    '[class*="last-price"]',
+    '[class*="currentPrice"]',
+    '[class*="mainValue"]',
+    '[class*="highlight"]',
+    '[class*="pane-legend"] [class*="value"]',
+    '[class*="legend"] [class*="value"]',
   ];
 
   for (const sel of headerSelectors) {
-    const el = document.querySelector(sel);
-    if (el) {
-      const text = el.textContent.trim().replace(/[^0-9.]/g, '');
+    const els = document.querySelectorAll(sel);
+    for (const el of els) {
+      const text = (el.textContent || '').trim().replace(/[^0-9.]/g, '');
       const price = parseFloat(text);
-      if (!isNaN(price) && price > 20000 && price < 40000) {
+      if (!isNaN(price) && price >= 25000 && price <= 35000) {
+        console.log(`[Priisma] Header price: ${price} (via ${sel})`);
         return price;
       }
     }
+  }
+
+  // Scan ALL text nodes for NQ-like prices
+  const allText = document.body.innerText || '';
+  const matches = allText.match(/\b(2[5-9]\d{3}|3[0-4]\d{3})(\.\d{1,2})?\b/g);
+  if (matches && matches.length > 0) {
+    const price = parseFloat(matches[0]);
+    console.log(`[Priisma] Price from body text: ${price}`);
+    return price;
   }
 
   return null;
@@ -407,10 +425,10 @@ function drawZones() {
   if (chartHeight < 100) return; // Chart not visible yet
 
   // Get visible price range
-  let priceRange = getPriceRange();
+  let priceRange = manualPriceRange || getPriceRange();
   if (!priceRange) {
     // Can't determine price range yet — try using a fallback
-    const headerPrice = getPriceFromHeader();
+    const headerPrice = getPriceFromHeader() || lastKnownPrice;
     if (!headerPrice) {
       // Don't log every 2s, just once
       if (!drawZones._loggedNoRange) {
@@ -486,6 +504,9 @@ function drawZones() {
  * Initialize the extension
  */
 function init() {
+  console.log(`[Priisma] Scanning page: ${window.location.href}`);
+  console.log(`[Priisma] Document has ${document.querySelectorAll('canvas').length} canvases`);
+
   chartContainer = findChartContainer();
 
   if (!chartContainer) {
@@ -494,11 +515,14 @@ function init() {
       setTimeout(init, 1000);
     } else {
       console.log('[Priisma] Could not find TradingView chart after 60 seconds.');
+      console.log('[Priisma] Page URL:', window.location.href);
+      console.log('[Priisma] Body classes:', document.body.className);
     }
     return;
   }
 
   console.log('[Priisma] Chart container found! Initializing LVN zones...');
+  console.log('[Priisma] Container:', chartContainer.tagName, chartContainer.className?.slice(0, 80));
 
   createOverlay();
   drawZones();
@@ -511,6 +535,9 @@ function init() {
 
   // Redraw periodically (catches scroll/zoom that doesn't trigger resize)
   setInterval(drawZones, 2000);
+
+  // Also try to intercept price data from WebSocket messages
+  interceptPriceData();
 
   // Watch for DOM changes (chart re-renders)
   const mutationObserver = new MutationObserver(() => {
@@ -526,6 +553,55 @@ function init() {
   });
 
   console.log(`[Priisma] LVN Zones active — ${NQ_ZONES.length} zones loaded for NQ`);
+}
+
+/**
+ * Try to intercept the current price from TradingView's internal data.
+ * TradingView stores chart data in global objects we can sometimes access.
+ */
+function interceptPriceData() {
+  // Method 1: Look for TradingView widget API
+  if (window.TradingView && window.TradingView.activeChart) {
+    try {
+      const chart = window.TradingView.activeChart();
+      if (chart) {
+        const price = chart.crossHairPrice && chart.crossHairPrice();
+        if (price) {
+          lastKnownPrice = price;
+          console.log(`[Priisma] Got price from TV API: ${price}`);
+        }
+      }
+    } catch (e) {
+      // Expected to fail in most cases
+    }
+  }
+
+  // Method 2: Monitor for price elements being added to DOM
+  const priceObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const text = (node.textContent || '').trim();
+          const match = text.match(/^(\d{5}(?:\.\d{1,2})?)$/);
+          if (match) {
+            const price = parseFloat(match[1]);
+            if (price >= 25000 && price <= 35000) {
+              if (lastKnownPrice !== price) {
+                lastKnownPrice = price;
+                console.log(`[Priisma] Price update from DOM: ${price}`);
+                drawZones();
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  priceObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 }
 
 /**
@@ -557,3 +633,37 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   // Running outside extension context (for testing)
   init();
 }
+
+/**
+ * MANUAL PRICE OVERRIDE
+ * If auto-detection fails, you can set the price range manually from console:
+ *
+ *   window.priismaSetPrice(21500)
+ *   window.priismaSetRange(21400, 21600)
+ *
+ * This will immediately draw the zones.
+ */
+window.priismaSetPrice = function(price) {
+  lastKnownPrice = price;
+  console.log(`[Priisma] Manual price set: ${price}`);
+  drawZones();
+};
+
+window.priismaSetRange = function(low, high) {
+  manualPriceRange = { low, high };
+  console.log(`[Priisma] Manual range set: ${low} – ${high}`);
+  drawZones();
+};
+
+window.priismaDebug = function() {
+  console.log('[Priisma] Debug info:');
+  console.log('  Chart container:', chartContainer?.tagName, chartContainer?.className?.slice(0, 60));
+  console.log('  Overlay:', overlay ? 'exists' : 'null');
+  console.log('  Enabled:', isEnabled);
+  console.log('  Last known price:', lastKnownPrice);
+  console.log('  Chart height:', chartContainer?.getBoundingClientRect()?.height);
+  console.log('  getPriceRange():', getPriceRange());
+  console.log('  getPriceFromHeader():', getPriceFromHeader());
+};
+
+let manualPriceRange = null;
